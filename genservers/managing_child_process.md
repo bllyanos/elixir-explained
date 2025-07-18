@@ -87,6 +87,48 @@ def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
 end
 ```
 
+### 🔍 Important: Monitor References vs PIDs
+
+**Monitor references cannot be used to interact with processes.** They're only for monitoring purposes. If you need to send messages to the child process, you must store the PID as well:
+
+```elixir
+{:ok, pid} = DynamicSupervisor.start_child(MatchTimerSupervisor, {TimerServer, 5_000})
+ref = Process.monitor(pid)
+{:noreply, %{state | timer_pid: pid, timer_ref: ref}}
+```
+
+Now you can interact with the timer:
+
+```elixir
+def handle_call({:extend_timer, extra_time}, _from, state) do
+  if state.timer_pid do
+    GenServer.cast(state.timer_pid, {:extend, extra_time})
+    {:reply, :ok, state}
+  else
+    {:reply, {:error, :no_timer}, state}
+  end
+end
+
+def handle_call(:stop_timer, _from, state) do
+  if state.timer_pid do
+    GenServer.stop(state.timer_pid, :normal)
+    {:reply, :ok, state}
+  else
+    {:reply, {:error, :no_timer}, state}
+  end
+end
+```
+
+Clean up both when the timer finishes:
+
+```elixir
+def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+  IO.puts("Timer finished or crashed: #{inspect(reason)}")
+  broadcast_timer_complete()
+  {:noreply, %{state | timer_pid: nil, timer_ref: nil}}
+end
+```
+
 ---
 
 ## 4. Starting and Linking a Related Timer Process
